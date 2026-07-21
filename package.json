@@ -1,0 +1,92 @@
+{
+  "name": "claude-diagnostics-bridge",
+  "displayName": "Claude Diagnostics Bridge",
+  "description": "Exports VS Code Problems panel diagnostics to a JSON file for Claude Code to read.",
+  "version": "0.1.0",
+  "private": true,
+  "publisher": "local",
+  "engines": {
+    "vscode": "^1.104.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "main": "./out/extension.js",
+  "icon": "icon.png",
+  "contributes": {
+    "configuration": {
+      "title": "Claude Diagnostics Bridge",
+      "properties": {
+        "claudeDiagnostics.outputPath": {
+          "type": "string",
+          "default": "",
+          "markdownDescription": "Where diagnostics are written. **Empty** (default) writes to a per-workspace file under `~/.claude/diagnostics/`, keeping repositories clean. An **absolute** path is used as-is. A **relative** path resolves against the workspace folder."
+        },
+        "claudeDiagnostics.minSeverity": {
+          "type": "string",
+          "enum": [
+            "error",
+            "warning",
+            "information",
+            "hint"
+          ],
+          "default": "warning",
+          "description": "Lowest severity to include in the exported file."
+        },
+        "claudeDiagnostics.debounceMs": {
+          "type": "number",
+          "default": 1500,
+          "description": "How long to wait after diagnostics change before writing."
+        },
+        "claudeDiagnostics.maxProblems": {
+          "type": "number",
+          "default": 2000,
+          "description": "Cap on exported problems. Truncation is reported in the file."
+        },
+        "claudeDiagnostics.statusBarDisplay": {
+          "type": "string",
+          "enum": [
+            "counts",
+            "mode",
+            "icon",
+            "hidden"
+          ],
+          "enumDescriptions": [
+            "Error and warning counts.",
+            "Icon plus the current minimum severity.",
+            "Icon only.",
+            "No status bar item."
+          ],
+          "default": "counts",
+          "description": "What the status bar item displays."
+        }
+      }
+    },
+    "commands": [
+      {
+        "command": "claudeDiagnostics.writeNow",
+        "title": "Claude Diagnostics: Write Snapshot Now"
+      },
+      {
+        "command": "claudeDiagnostics.showMenu",
+        "title": "Claude Diagnostics: Show Menu"
+      },
+      {
+        "command": "claudeDiagnostics.togglePaused",
+        "title": "Claude Diagnostics: Toggle Paused"
+      }
+    ]
+  },
+  "scripts": {
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "@types/vscode": "^1.104.0",
+    "typescript": "^5.9.0"
+  }
+}

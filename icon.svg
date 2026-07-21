@@ -1,0 +1,17 @@
+<svg width="128" height="128" viewBox="0 0 128 128" xmlns="http://www.w3.org/2000/svg">
+  <!-- warm charcoal app-icon background -->
+  <rect x="0" y="0" width="128" height="128" rx="28" fill="#2B2622"/>
+
+  <!-- Claude-style four-point spark, offset up-left to clear the badge -->
+  <path d="M60,14 Q75,41 102,56 Q75,71 60,98 Q45,71 18,56 Q45,41 60,14 Z"
+        fill="#D97757"/>
+  <!-- small companion spark -->
+  <path d="M96,20 Q101,31 112,36 Q101,41 96,52 Q91,41 80,36 Q91,31 96,20 Z"
+        fill="#D97757" opacity="0.55"/>
+
+  <!-- warning badge, bottom-right, ringed to separate it from the spark -->
+  <path d="M98,78 L118,110 Q120,114 116,114 L80,114 Q76,114 78,110 Z"
+        fill="#E8A33D" stroke="#2B2622" stroke-width="5" stroke-linejoin="round"/>
+  <rect x="95.5" y="90" width="5" height="12" rx="2.5" fill="#2B2622"/>
+  <circle cx="98" cy="108" r="2.8" fill="#2B2622"/>
+</svg>
