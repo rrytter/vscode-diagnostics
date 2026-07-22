@@ -20,24 +20,39 @@ without prompting.
 
 ## Install
 
-```bash
-cd vscode-extension && npm install && npm run compile
-cd mcp && npm install
-```
-
-Link the extension into VS Code so it loads in every window:
+Download the latest `.vsix` from the
+[**Releases**](https://github.com/rrytter/vscode-diagnostics/releases/latest)
+page, then either:
 
 ```bash
-ln -s "$(pwd)" ~/.vscode/extensions/claude-diagnostics-bridge
+code --install-extension claude-diagnostics-bridge-0.1.0.vsix
 ```
 
-For WSL, use `~/.vscode-server/extensions/` instead. Then reload VS Code
-(`Developer: Reload Window`). Verify with
-`Claude Diagnostics: Write Snapshot Now` from the command palette, then
-`Copy snapshot path` from the status bar menu to see where it landed.
+or, in VS Code: **Extensions → ⋯ (top right) → Install from VSIX…**
 
-To iterate on the extension instead, open this folder in VS Code and press F5 for
-an Extension Development Host.
+Reload the window (`Developer: Reload Window`). On first activation the extension
+offers to register its MCP server — see
+[Registering the server](#registering-the-server-once-per-machine). Verify the
+bridge itself with `Claude Diagnostics: Write Snapshot Now` from the command
+palette, then `Copy snapshot path` from the status bar menu to see where the
+snapshot landed.
+
+> **Devcontainers:** install the extension *inside* the container (add it to
+> `devcontainer.json`'s `extensions`, or install the `.vsix` in the running
+> window). Nothing needs to be mounted — see
+> [devcontainer behaviour](#why-claudejson-and-how-it-behaves-in-devcontainers).
+
+### Building from source
+
+```bash
+git clone https://github.com/rrytter/vscode-diagnostics.git
+cd vscode-diagnostics
+npm install && cd mcp && npm install && cd ..
+npm run compile && npm run bundle-mcp
+```
+
+Press <kbd>F5</kbd> to launch an Extension Development Host, or package a `.vsix`
+of your own with `npx @vscode/vsce package`.
 
 ## Output location
 

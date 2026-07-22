@@ -25,9 +25,10 @@ tsconfig.json
 mcp/server.js
 mcp/package.json
 
-# --- Repo / editor cruft ---
+# --- Repo / editor / CI cruft ---
 .gitignore
 .vscode/**
+.github/**
 **/.git/**
 *.vsix
 
