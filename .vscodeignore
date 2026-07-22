@@ -1,0 +1,36 @@
+# Controls what `vsce package` includes in the .vsix. When this file exists, vsce
+# uses it INSTEAD of .gitignore — so everything not excluded here is shipped.
+#
+# What MUST ship:
+#   - out/extension.js        — the compiled extension.
+#   - out/mcp-server.mjs      — the esbuild-bundled MCP server, deps inlined.
+#                               The registration points node at this file.
+#   - skills/fix-problems/    — the skill the install command copies into a project.
+# Everything below is excluded because it is dev-only or redundant with the bundle.
+
+# --- TypeScript sources and sourcemaps ---
+src/**
+tsconfig.json
+**/*.ts
+**/*.map
+
+# --- ALL node_modules: none are needed at runtime. The extension's deps are
+# dev-only (typescript, esbuild); the MCP server's deps are inlined into the
+# bundle, so mcp/node_modules (25MB) must NOT ship. ---
+**/node_modules/**
+
+# --- The unbundled MCP server: kept in the repo for local dev (F5), but the
+# packaged extension launches out/mcp-server.mjs instead. Shipping mcp/server.js
+# without its node_modules would be a broken, unrunnable copy. ---
+mcp/server.js
+mcp/package.json
+
+# --- Repo / editor cruft ---
+.gitignore
+.vscode/**
+**/.git/**
+*.vsix
+
+# --- Lockfiles ---
+package-lock.json
+mcp/package-lock.json

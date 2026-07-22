@@ -97,7 +97,7 @@ bridge would defeat the point.
 
 ## MCP tools
 
-Registered in `../.mcp.json` at the project root. Two tools:
+Two tools:
 
 - **`get_diagnostics_summary`** — counts by severity, source, and file. Start here
   on a noisy codebase.
@@ -106,6 +106,73 @@ Registered in `../.mcp.json` at the project root. Two tools:
 
 Both report the snapshot's age and warn when it is over five minutes old, so a
 stale export is visible rather than silently misleading.
+
+### Registering the server (once per machine)
+
+The extension can register the MCP server for you, so installing the extension is
+the whole setup. The **first time it activates** it asks once; choosing *Register*
+adds a single `diagnostics` entry to your **`~/.claude.json`** under user scope.
+Both the Claude Code CLI and the Claude VS Code extension read that file, so one
+registration covers both. Restart Claude Code afterwards to pick it up.
+
+Two palette commands (also in the status-bar menu) manage it explicitly:
+
+- **Claude Diagnostics: Register MCP Server** — add / refresh the entry.
+- **Claude Diagnostics: Unregister MCP Server** — remove it. Use this to clean up:
+  VS Code does not reliably run extension cleanup on uninstall, so removing the
+  extension does **not** delete the entry on its own.
+
+The write is idempotent and atomic. Only the `diagnostics` key is touched — any
+other MCP servers in `~/.claude.json` are left untouched — and the entry is
+refreshed on each activate so it survives the install-path change that comes with
+a version bump.
+
+Prefer to register it yourself instead? Decline the prompt and either add an
+`mcpServers.diagnostics` entry to `~/.claude.json` by hand, or keep a project-scope
+`.mcp.json`. (Note: MCP servers can only be *defined* in `~/.claude.json` or a
+project `.mcp.json` — `settings.json` cannot define them, only allow/deny them.)
+
+### Installing the fix-problems skill
+
+The MCP server tells Claude *what* is wrong; the `fix-problems` **skill** carries
+the *conventions* for fixing it — which findings are mechanical versus judgement
+calls, and the verify-after-edit discipline. The extension bundles the skill and
+can drop it into a workspace on demand:
+
+- **Claude Diagnostics: Install Fix-Problems Skill** copies it into
+  **`<workspace>/.claude/skills/fix-problems/`**.
+
+Unlike the MCP registration, the skill is installed at **project scope**, not into
+`~/.claude/`. It is opinionated workflow you may want to edit, version, or commit,
+and project scope means it rides into a devcontainer with the mounted project and
+never collides with a global skill tuned for another project. The trade-off: it is
+per-project — run the command once in each workspace where you want it.
+
+It is **command-only** (no first-run prompt) and **never overwrites**: if a
+`fix-problems` skill already exists in the workspace, you are offered *Open it* or
+*Overwrite* rather than silently clobbering edits you may have made.
+
+### Why `~/.claude.json`, and how it behaves in devcontainers
+
+`~/.claude.json` is a **per-machine** file that sits *beside* — not inside — the
+`~/.claude/` directory. That separation is deliberate and is what makes the
+devcontainer story work with **nothing mounted**:
+
+- Install the extension **in the container** (add it to `devcontainer.json`'s
+  extensions, or install it in the running window). On activate it writes the
+  snapshot to the container's own `~/.claude/diagnostics/…` and registers the
+  container's own `server.js` path into the container's own `~/.claude.json`.
+- The Claude Code CLI / extension **inside the container** reads those
+  container-local files. Everything stays in the container — no host mount needed.
+
+Conversely, do **not** mount the host's `~/.claude.json` into the container: it
+records the *host's* `server.js` path, which does not exist in the container, and
+would break the server there. Mounting the `~/.claude/` directory alone is fine —
+it holds no machine-specific server paths.
+
+The requirement is simply that the extension is **installed on whichever machine
+runs the language servers** (host for a local workspace, container for a
+devcontainer). Each machine self-registers with a path valid for that machine.
 
 ## Enterprise note
 
@@ -116,9 +183,9 @@ workspace.
 
 This distinction matters because policies restricting "MCP servers" are usually
 aimed at remote or third-party ones that transmit code externally. If that
-distinction is not available to you, delete `.mcp.json` and keep layer 1 — Claude
-reads the JSON file directly (the path is in `CLAUDE.md`) and the workflow still
-works.
+distinction is not available to you, skip registration (or run *Unregister MCP
+Server*) and keep layer 1 — Claude reads the JSON file directly (the path is in
+`CLAUDE.md`) and the workflow still works.
 
 The default output lives under `~/.claude/diagnostics/`, outside any repository,
 so there is nothing to `.gitignore`. If you point `outputPath` back inside a repo,

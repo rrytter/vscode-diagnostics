@@ -2,6 +2,8 @@ import * as vscode from 'vscode';
 import * as path from 'node:path';
 import * as os from 'node:os';
 import * as crypto from 'node:crypto';
+import { registerMcpServer, unregisterMcpServer } from './mcp-register';
+import { installSkill } from './skill-install';
 
 type SeverityName = 'error' | 'warning' | 'information' | 'hint';
 
@@ -40,10 +42,23 @@ type DisplayMode = 'counts' | 'mode' | 'icon' | 'hidden';
 
 const PAUSED_KEY = 'claudeDiagnostics.paused';
 
+/**
+ * Consent state for editing the user's global `~/.claude.json`. Stored in
+ * globalState (per-machine) because the file itself is per-machine and
+ * deliberately not shared into devcontainers.
+ *   undefined -> never asked
+ *   'granted' -> may upsert on activate
+ *   'denied'  -> leave the file alone
+ */
+const MCP_CONSENT_KEY = 'claudeDiagnostics.mcpConsent';
+
 let timer: NodeJS.Timeout | undefined;
 let output: vscode.OutputChannel;
 let statusBar: vscode.StatusBarItem;
 let state: vscode.Memento;
+let globalState: vscode.Memento;
+/** Stashed for menu handlers that need the extension install path. */
+let currentContext: vscode.ExtensionContext;
 
 /** Last write outcome, surfaced in the status bar. */
 let lastError: string | undefined;
@@ -58,6 +73,8 @@ let lastCounts: Record<SeverityName, number> = {
 export function activate(context: vscode.ExtensionContext) {
     output = vscode.window.createOutputChannel('Claude Diagnostics Bridge');
     state = context.workspaceState;
+    globalState = context.globalState;
+    currentContext = context;
 
     statusBar = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 100);
     statusBar.command = 'claudeDiagnostics.showMenu';
@@ -69,6 +86,15 @@ export function activate(context: vscode.ExtensionContext) {
         vscode.commands.registerCommand('claudeDiagnostics.writeNow', () => write()),
         vscode.commands.registerCommand('claudeDiagnostics.showMenu', () => showMenu()),
         vscode.commands.registerCommand('claudeDiagnostics.togglePaused', () => togglePaused()),
+        vscode.commands.registerCommand('claudeDiagnostics.registerMcp', () =>
+            registerMcpCommand(context),
+        ),
+        vscode.commands.registerCommand('claudeDiagnostics.unregisterMcp', () =>
+            unregisterMcpCommand(),
+        ),
+        vscode.commands.registerCommand('claudeDiagnostics.installSkill', () =>
+            installSkill(context, output),
+        ),
         vscode.workspace.onDidChangeConfiguration((e) => {
             if (e.affectsConfiguration('claudeDiagnostics')) {
                 render();
@@ -79,6 +105,74 @@ export function activate(context: vscode.ExtensionContext) {
 
     render();
     schedule();
+    void ensureMcpRegistered(context);
+}
+
+/**
+ * On activate: if the user has already consented, refresh our entry in
+ * `~/.claude.json` (the path changes on version bumps). If they have never been
+ * asked, prompt once — non-modally, so startup is never blocked. A prior "deny"
+ * is respected silently; they can still opt in later via the command.
+ */
+async function ensureMcpRegistered(context: vscode.ExtensionContext) {
+    const consent = globalState.get<'granted' | 'denied'>(MCP_CONSENT_KEY);
+
+    if (consent === 'granted') {
+        try {
+            await registerMcpServer(context, output);
+        } catch (err) {
+            output.appendLine(`MCP registration failed: ${err}`);
+        }
+        return;
+    }
+    if (consent === 'denied') {
+        return;
+    }
+
+    const choice = await vscode.window.showInformationMessage(
+        'Register the Claude Diagnostics MCP server so Claude Code (CLI and ' +
+            'VS Code) can read this workspace’s Problems panel? This adds one ' +
+            'entry to your ~/.claude.json.',
+        'Register',
+        'Not now',
+    );
+    if (choice === 'Register') {
+        await globalState.update(MCP_CONSENT_KEY, 'granted');
+        await registerMcpCommand(context);
+    } else if (choice === 'Not now') {
+        // Not persisted as a hard "denied": leaving it unset means we ask again
+        // on a future session, which is friendlier than a one-shot refusal.
+    }
+}
+
+async function registerMcpCommand(context: vscode.ExtensionContext) {
+    try {
+        const wrote = await registerMcpServer(context, output);
+        await globalState.update(MCP_CONSENT_KEY, 'granted');
+        vscode.window.showInformationMessage(
+            wrote
+                ? 'Claude Diagnostics MCP server registered. Restart Claude Code to pick it up.'
+                : 'Claude Diagnostics MCP server already registered and up to date.',
+        );
+    } catch (err) {
+        vscode.window.showErrorMessage(`Could not register MCP server: ${err}`);
+        output.appendLine(`MCP registration failed: ${err}`);
+    }
+}
+
+async function unregisterMcpCommand() {
+    try {
+        const removed = await unregisterMcpServer(output);
+        await globalState.update(MCP_CONSENT_KEY, 'denied');
+        vscode.window.showInformationMessage(
+            removed
+                ? 'Claude Diagnostics MCP server removed from ~/.claude.json.'
+                : 'Claude Diagnostics MCP server was not registered.',
+        );
+    } catch (err) {
+        vscode.window.showErrorMessage(`Could not remove MCP server: ${err}`);
+        output.appendLine(`MCP unregistration failed: ${err}`);
+    }
 }
 
 export function deactivate() {
@@ -237,6 +331,21 @@ async function showMenu() {
         {
             label: '$(clippy) Copy snapshot path',
             run: copyPath,
+        },
+        {
+            label: '$(plug) Register MCP server',
+            description: 'Add the diagnostics MCP server to ~/.claude.json',
+            run: () => registerMcpCommand(currentContext),
+        },
+        {
+            label: '$(debug-disconnect) Unregister MCP server',
+            description: 'Remove it from ~/.claude.json',
+            run: unregisterMcpCommand,
+        },
+        {
+            label: '$(book) Install fix-problems skill',
+            description: 'Copy the skill into this workspace’s .claude/skills/',
+            run: () => installSkill(currentContext, output),
         },
         {
             label: '$(output) Show log',

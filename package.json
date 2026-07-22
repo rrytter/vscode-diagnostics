@@ -3,8 +3,24 @@
   "displayName": "Claude Diagnostics Bridge",
   "description": "Exports VS Code Problems panel diagnostics to a JSON file for Claude Code to read.",
   "version": "0.1.0",
-  "private": true,
-  "publisher": "local",
+  "publisher": "rrytter",
+  "license": "MIT",
+  "author": "Romain Rytter",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/rrytter/vscode-diagnostics.git"
+  },
+  "bugs": {
+    "url": "https://github.com/rrytter/vscode-diagnostics/issues"
+  },
+  "homepage": "https://github.com/rrytter/vscode-diagnostics#readme",
+  "keywords": [
+    "claude",
+    "claude-code",
+    "diagnostics",
+    "problems",
+    "mcp"
+  ],
   "engines": {
     "vscode": "^1.104.0"
   },
@@ -77,16 +93,31 @@
       {
         "command": "claudeDiagnostics.togglePaused",
         "title": "Claude Diagnostics: Toggle Paused"
+      },
+      {
+        "command": "claudeDiagnostics.registerMcp",
+        "title": "Claude Diagnostics: Register MCP Server"
+      },
+      {
+        "command": "claudeDiagnostics.unregisterMcp",
+        "title": "Claude Diagnostics: Unregister MCP Server"
+      },
+      {
+        "command": "claudeDiagnostics.installSkill",
+        "title": "Claude Diagnostics: Install Fix-Problems Skill"
       }
     ]
   },
   "scripts": {
     "compile": "tsc -p ./",
-    "watch": "tsc -watch -p ./"
+    "watch": "tsc -watch -p ./",
+    "bundle-mcp": "esbuild mcp/server.js --bundle --platform=node --format=esm --target=node18 --outfile=out/mcp-server.mjs",
+    "vscode:prepublish": "npm run compile && npm run bundle-mcp"
   },
   "devDependencies": {
     "@types/node": "^24.0.0",
     "@types/vscode": "^1.104.0",
+    "esbuild": "^0.24.2",
     "typescript": "^5.9.0"
   }
 }
