@@ -4,6 +4,7 @@ import * as os from 'node:os';
 import * as crypto from 'node:crypto';
 import { registerMcpServer, unregisterMcpServer } from './mcp-register';
 import { installSkill } from './skill-install';
+import { warmUpDiagnostics } from './warmup';
 
 type SeverityName = 'error' | 'warning' | 'information' | 'hint';
 
@@ -94,6 +95,9 @@ export function activate(context: vscode.ExtensionContext) {
         ),
         vscode.commands.registerCommand('claudeDiagnostics.installSkill', () =>
             installSkill(context, output),
+        ),
+        vscode.commands.registerCommand('claudeDiagnostics.warmUp', () =>
+            warmUpDiagnostics(output),
         ),
         vscode.workspace.onDidChangeConfiguration((e) => {
             if (e.affectsConfiguration('claudeDiagnostics')) {
@@ -313,6 +317,11 @@ async function showMenu() {
             label: '$(save) Write snapshot now',
             description: 'Force an immediate export',
             run: write,
+        },
+        {
+            label: '$(search) Warm up project diagnostics',
+            description: 'Load project files so linters report on all of them',
+            run: () => warmUpDiagnostics(output),
         },
         {
             label: '$(filter) Minimum severity',

@@ -54,6 +54,38 @@ npm run compile && npm run bundle-mcp
 Press <kbd>F5</kbd> to launch an Extension Development Host, or package a `.vsix`
 of your own with `npx @vscode/vsce package`.
 
+## Project-wide diagnostics (warm-up)
+
+Language servers only report problems for files they have actually analysed —
+in practice, files that have been opened. A freshly opened window therefore has a
+near-empty Problems panel, and a snapshot of it reads as *"this project is
+clean"* when in truth nobody has looked yet. That false-clean result is precisely
+what this bridge exists to prevent.
+
+**Claude Diagnostics: Warm Up Project Diagnostics** (also in the status bar menu)
+forces the issue: it loads the project's files so every language server analyses
+them, then the snapshot reflects the whole project rather than the tabs you
+happen to have open.
+
+Files are loaded with `openTextDocument`, which registers them with the language
+servers **without opening editor tabs** — your tab bar is untouched even for a
+few thousand files.
+
+The pass is genuinely expensive (every linter analyses every file), so it is a
+deliberate command rather than something that runs at startup, and it shows a
+**cancellable** progress notification. Above `warmupMaxFiles` it asks first
+rather than silently analysing a subset.
+
+Language servers work asynchronously: when the pass finishes they are usually
+still analysing, and the snapshot keeps updating on its own debounce as results
+arrive. Give it a moment before trusting the counts.
+
+| Setting | Default | Meaning |
+| --- | --- | --- |
+| `claudeDiagnostics.warmupInclude` | `**/*` | Files to load. Narrow to your linted languages (e.g. `**/*.{php,ts,js}`) to speed the pass up a lot. |
+| `claudeDiagnostics.warmupExclude` | `node_modules`, `vendor`, `.git`, `dist`, … | Excluded on top of your `files.exclude` / `search.exclude`, which are always honoured. |
+| `claudeDiagnostics.warmupMaxFiles` | `2000` | Count above which it asks before proceeding. |
+
 ## Output location
 
 By default the snapshot is written to:
@@ -79,6 +111,9 @@ behaviour). Leave it empty for the home-dir default.
 | `claudeDiagnostics.debounceMs` | `1500` | Quiet period after a change before writing. |
 | `claudeDiagnostics.maxProblems` | `2000` | Export cap; truncation is flagged in the file. |
 | `claudeDiagnostics.statusBarDisplay` | `counts` | `counts`, `mode`, `icon`, or `hidden`. |
+| `claudeDiagnostics.warmupInclude` | `**/*` | Files loaded by the [warm-up pass](#project-wide-diagnostics-warm-up). |
+| `claudeDiagnostics.warmupExclude` | `node_modules`, `vendor`, … | Excluded from the warm-up pass. |
+| `claudeDiagnostics.warmupMaxFiles` | `2000` | Warm-up count above which it asks first. |
 
 Only the first workspace folder is exported, and only `file://` URIs inside it —
 diffs, settings editors, and files outside the workspace are skipped.
@@ -98,8 +133,10 @@ Counts use `$(error)` and `$(warning)`, matching the Problems panel. Write
 failures use `$(alert)` rather than `$(error)` so a broken bridge never reads as
 "your code has one error". The tooltip shows the exact output path.
 
-Click it for a menu: pause/resume, write now, change minimum severity, change the
-status bar display, open the snapshot, copy its path, show the log. Severity and display changes
+Click it for a menu: pause/resume, write now, warm up project diagnostics, change
+minimum severity, change the status bar display, register/unregister the MCP
+server, install the fix-problems skill, open the snapshot, copy its path, show the
+log. Severity and display changes
 are written to workspace settings; **pause is per-workspace and survives reloads**,
 so a paused bridge stays paused until you resume it.
 

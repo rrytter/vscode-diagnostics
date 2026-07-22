@@ -2,7 +2,7 @@
   "name": "claude-diagnostics-bridge",
   "displayName": "Claude Diagnostics Bridge",
   "description": "Exports VS Code Problems panel diagnostics to a JSON file for Claude Code to read.",
-  "version": "0.1.1",
+  "version": "0.2.0",
   "publisher": "rrytter",
   "license": "MIT",
   "author": "Romain Rytter",
@@ -62,6 +62,21 @@
           "default": 2000,
           "description": "Cap on exported problems. Truncation is reported in the file."
         },
+        "claudeDiagnostics.warmupInclude": {
+          "type": "string",
+          "default": "**/*",
+          "markdownDescription": "Glob of files loaded by **Warm Up Project Diagnostics**. Narrow it to the languages you lint, e.g. `**/*.{php,ts,js}`, to make the pass much faster."
+        },
+        "claudeDiagnostics.warmupExclude": {
+          "type": "string",
+          "default": "**/{node_modules,vendor,.git,dist,out,build,.next,.venv,__pycache__,coverage}/**",
+          "markdownDescription": "Glob excluded from the warm-up pass. Applied on top of your `files.exclude` and `search.exclude` settings, which are always honoured."
+        },
+        "claudeDiagnostics.warmupMaxFiles": {
+          "type": "number",
+          "default": 2000,
+          "description": "File count above which the warm-up asks before proceeding. It never truncates silently."
+        },
         "claudeDiagnostics.statusBarDisplay": {
           "type": "string",
           "enum": [
@@ -105,6 +120,10 @@
       {
         "command": "claudeDiagnostics.installSkill",
         "title": "Claude Diagnostics: Install Fix-Problems Skill"
+      },
+      {
+        "command": "claudeDiagnostics.warmUp",
+        "title": "Claude Diagnostics: Warm Up Project Diagnostics"
       }
     ]
   },
