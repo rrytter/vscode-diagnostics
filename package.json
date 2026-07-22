@@ -2,7 +2,7 @@
   "name": "claude-diagnostics-bridge",
   "displayName": "Claude Diagnostics Bridge",
   "description": "Exports VS Code Problems panel diagnostics to a JSON file for Claude Code to read.",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "publisher": "rrytter",
   "license": "MIT",
   "author": "Romain Rytter",
