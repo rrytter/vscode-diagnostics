@@ -2,7 +2,7 @@
   "name": "claude-diagnostics-bridge",
   "displayName": "Claude Diagnostics Bridge",
   "description": "Exports VS Code Problems panel diagnostics to a JSON file for Claude Code to read.",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "publisher": "rrytter",
   "license": "MIT",
   "author": "Romain Rytter",
@@ -77,6 +77,11 @@
           "default": 2000,
           "description": "File count above which the warm-up asks before proceeding. It never truncates silently."
         },
+        "claudeDiagnostics.warmupSettleTimeoutMs": {
+          "type": "number",
+          "default": 120000,
+          "markdownDescription": "How long **Warm Up Project Diagnostics** keeps files loaded while waiting for language servers to finish. The pass ends once diagnostics stop arriving; this is the upper bound for slow servers on large projects. Files are released afterwards, so a timeout is reported rather than hidden."
+        },
         "claudeDiagnostics.statusBarDisplay": {
           "type": "string",
           "enum": [
@@ -124,6 +129,10 @@
       {
         "command": "claudeDiagnostics.warmUp",
         "title": "Claude Diagnostics: Warm Up Project Diagnostics"
+      },
+      {
+        "command": "claudeDiagnostics.resumeLive",
+        "title": "Claude Diagnostics: Resume Live Updates"
       }
     ]
   },

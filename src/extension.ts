@@ -5,29 +5,20 @@ import * as crypto from 'node:crypto';
 import { registerMcpServer, unregisterMcpServer } from './mcp-register';
 import { installSkill } from './skill-install';
 import { warmUpDiagnostics } from './warmup';
-
-type SeverityName = 'error' | 'warning' | 'information' | 'hint';
-
-const SEVERITY_NAMES: Record<vscode.DiagnosticSeverity, SeverityName> = {
-    [vscode.DiagnosticSeverity.Error]: 'error',
-    [vscode.DiagnosticSeverity.Warning]: 'warning',
-    [vscode.DiagnosticSeverity.Information]: 'information',
-    [vscode.DiagnosticSeverity.Hint]: 'hint',
-};
+import {
+    ExportedProblem,
+    SeverityName,
+    currentProblems,
+    accumulatedFileCount,
+    getWarmupInfo,
+    isLive,
+    isWarmingUp,
+    resumeLive,
+    setModeChangeListener,
+    dispose as disposeCollector,
+} from './collector';
 
 const SEVERITY_ORDER: SeverityName[] = ['error', 'warning', 'information', 'hint'];
-
-interface ExportedProblem {
-    file: string;
-    line: number;
-    column: number;
-    endLine: number;
-    endColumn: number;
-    severity: SeverityName;
-    source: string;
-    code: string | null;
-    message: string;
-}
 
 interface Snapshot {
     generatedAt: string;
@@ -36,6 +27,24 @@ interface Snapshot {
     counts: Record<SeverityName, number>;
     total: number;
     truncated: boolean;
+    /**
+     * `live` mirrors the Problems panel as it changes — the panel only covers
+     * files a language server currently holds, so an untouched project reads as
+     * clean. `accumulated` is the post-warm-up mode: every problem found is
+     * retained even after VS Code evicts the document and the panel forgets it,
+     * so this is the mode where the counts describe the project rather than the
+     * editor session.
+     */
+    mode: 'live' | 'accumulated';
+    /** Coverage of the last warm-up, absent if none ran this session. */
+    warmup?: {
+        completedAt: string;
+        fileCount: number;
+        cancelled: boolean;
+        timedOut: boolean;
+        /** Files currently contributing problems to the accumulation. */
+        filesWithProblems: number;
+    };
     problems: ExportedProblem[];
 }
 
@@ -80,6 +89,10 @@ export function activate(context: vscode.ExtensionContext) {
     statusBar = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 100);
     statusBar.command = 'claudeDiagnostics.showMenu';
 
+    // The live/accumulated icon has to flip the instant the mode changes, not at
+    // the next debounced write — a stale icon here misrepresents the snapshot.
+    setModeChangeListener(() => render());
+
     context.subscriptions.push(
         output,
         statusBar,
@@ -96,8 +109,13 @@ export function activate(context: vscode.ExtensionContext) {
         vscode.commands.registerCommand('claudeDiagnostics.installSkill', () =>
             installSkill(context, output),
         ),
-        vscode.commands.registerCommand('claudeDiagnostics.warmUp', () =>
-            warmUpDiagnostics(output),
+        vscode.commands.registerCommand('claudeDiagnostics.warmUp', async () => {
+            await warmUpDiagnostics(output);
+            render();
+            await write();
+        }),
+        vscode.commands.registerCommand('claudeDiagnostics.resumeLive', () =>
+            resumeLiveCommand(),
         ),
         vscode.workspace.onDidChangeConfiguration((e) => {
             if (e.affectsConfiguration('claudeDiagnostics')) {
@@ -179,10 +197,31 @@ async function unregisterMcpCommand() {
     }
 }
 
+/**
+ * Leave accumulated mode and go back to mirroring the panel.
+ *
+ * Discards the record, so the next write reports only what the panel currently
+ * holds — after a warm-up, a small fraction of the project. That drop is
+ * expected, and resuming is an explicit user action, so it is logged rather than
+ * confirmed: a prompt on every resume is noise on a deliberate command.
+ */
+async function resumeLiveCommand() {
+    if (isLive()) {
+        return;
+    }
+
+    const held = accumulatedFileCount();
+    resumeLive();
+    output.appendLine(`Resumed live updates (discarded ${held} accumulated file(s)).`);
+    render();
+    await write();
+}
+
 export function deactivate() {
     if (timer) {
         clearTimeout(timer);
     }
+    disposeCollector();
 }
 
 function config() {
@@ -231,6 +270,30 @@ async function togglePaused() {
     }
 }
 
+/** Explains the live/accumulated distinction in words, not just an icon. */
+function modeTooltipLines(live: boolean, liveIcon: string): string[] {
+    if (live) {
+        return [`${liveIcon} **Live** — the snapshot follows the Problems panel.`];
+    }
+
+    const lines = [
+        `${liveIcon} **Accumulated** — holding every problem found by the warm-up, ` +
+            'including files VS Code has since closed.',
+    ];
+
+    const warmup = getWarmupInfo();
+    if (warmup) {
+        const when = new Date(warmup.completedAt).toLocaleTimeString();
+        const caveat =
+            (warmup.timedOut ? ' (timed out)' : '') +
+            (warmup.cancelled ? ' (cancelled)' : '');
+        lines.push(`Warm-up: ${warmup.fileCount} file(s) at ${when}${caveat}`);
+    }
+
+    lines.push('Fixes are still picked up. Resume when you are done.');
+    return lines;
+}
+
 function render() {
     const display = config().get<DisplayMode>('statusBarDisplay', 'counts');
     if (display === 'hidden') {
@@ -239,7 +302,13 @@ function render() {
     }
 
     const paused = isPaused();
+    const live = isLive();
     const minSeverity = config().get<SeverityName>('minSeverity', 'warning');
+
+    // Filled bullet: live, tracking the panel. Hollow bullet: accumulated, the
+    // snapshot is a frozen record. The distinction has to survive every display
+    // mode — reading a frozen snapshot as live is the mistake that matters.
+    const liveIcon = live ? '$(circle-filled)' : '$(circle-outline)';
 
     // A failure or a pause overrides the display mode: those states must stay
     // legible even when the user picked icon-only.
@@ -251,12 +320,12 @@ function render() {
     } else if (paused) {
         text = '$(debug-pause) paused';
     } else if (display === 'mode') {
-        text = `$(broadcast) ${minSeverity}`;
+        text = `${liveIcon} ${minSeverity}`;
     } else if (display === 'icon') {
-        text = '$(broadcast)';
+        text = liveIcon;
     } else {
         // counts: the $(error)/$(warning) icons carry the meaning on their own.
-        text = `$(error) ${lastCounts.error} $(warning) ${lastCounts.warning}`;
+        text = `${liveIcon} $(error) ${lastCounts.error} $(warning) ${lastCounts.warning}`;
     }
     statusBar.text = text;
 
@@ -276,21 +345,32 @@ function render() {
         statusLine = 'Status: running';
     }
 
-    statusBar.tooltip = new vscode.MarkdownString(
-        [
-            '**Claude Diagnostics Bridge**',
-            '',
-            statusLine,
-            '',
-            `Exporting: **${minSeverity}** and above`,
-            `Last written: ${written}`,
-            `Problems: ${lastCounts.error} error, ${lastCounts.warning} warning`,
-            root ? `Writes to: \`${resolveTarget(root).fsPath}\`` : 'No workspace open.',
-            '',
-            '_Click for options._',
-        ].join('\n'),
-        true,
-    );
+    // The tooltip and the progress notification share the bottom-right corner,
+    // so hovering the status bar during a warm-up covers the progress panel the
+    // user is actually watching. Drop the tooltip for the duration of the pass;
+    // it comes back once the pass ends, which is when its contents start being
+    // useful anyway.
+    statusBar.tooltip = isWarmingUp()
+        ? undefined
+        : new vscode.MarkdownString(
+              [
+                  '**Claude Diagnostics Bridge**',
+                  '',
+                  statusLine,
+                  '',
+                  ...modeTooltipLines(live, liveIcon),
+                  '',
+                  `Exporting: **${minSeverity}** and above`,
+                  `Last written: ${written}`,
+                  `Problems: ${lastCounts.error} error, ${lastCounts.warning} warning`,
+                  root
+                      ? `Writes to: \`${resolveTarget(root).fsPath}\``
+                      : 'No workspace open.',
+                  '',
+                  '_Click for options._',
+              ].join('\n'),
+              true,
+          );
 
     // Status bar items are created hidden; nothing renders without this.
     statusBar.show();
@@ -323,6 +403,15 @@ async function showMenu() {
             description: 'Load project files so linters report on all of them',
             run: () => warmUpDiagnostics(output),
         },
+        ...(isLive()
+            ? []
+            : [
+                  {
+                      label: '$(circle-filled) Resume live updates',
+                      description: 'Stop holding warm-up results; follow the panel again',
+                      run: resumeLiveCommand,
+                  },
+              ]),
         {
             label: '$(filter) Minimum severity',
             description: `currently: ${minSeverity}`,
@@ -457,31 +546,12 @@ function schedule() {
     timer = setTimeout(() => void write(), config().get<number>('debounceMs', 1500));
 }
 
-/**
- * Diagnostics arrive for every open document, including ones outside the
- * workspace (git diff views, settings.json, node_modules). Only files under a
- * workspace folder are worth reporting, and paths are emitted relative to that
- * folder so they stay stable and clickable.
- */
-function resolveRelative(uri: vscode.Uri, root: vscode.WorkspaceFolder): string | null {
-    if (uri.scheme !== 'file') {
-        return null;
+function summarizeWarmup(): Snapshot['warmup'] {
+    const warmup = getWarmupInfo();
+    if (!warmup) {
+        return undefined;
     }
-    const relative = path.relative(root.uri.fsPath, uri.fsPath);
-    if (relative.startsWith('..') || path.isAbsolute(relative)) {
-        return null;
-    }
-    return relative.split(path.sep).join('/');
-}
-
-function codeToString(code: vscode.Diagnostic['code']): string | null {
-    if (code === undefined || code === null) {
-        return null;
-    }
-    if (typeof code === 'string' || typeof code === 'number') {
-        return String(code);
-    }
-    return String(code.value);
+    return { ...warmup, filesWithProblems: accumulatedFileCount() };
 }
 
 async function write() {
@@ -500,33 +570,15 @@ async function write() {
         information: 0,
         hint: 0,
     };
-    const problems: ExportedProblem[] = [];
-
-    for (const [uri, diagnostics] of vscode.languages.getDiagnostics()) {
-        const file = resolveRelative(uri, root);
-        if (file === null) {
-            continue;
+    // Live mode reads the panel; accumulated mode reads the record built since
+    // the warm-up. The severity filter applies the same way to both.
+    const problems = currentProblems(root).filter((problem) => {
+        if (SEVERITY_ORDER.indexOf(problem.severity) > threshold) {
+            return false;
         }
-        for (const diagnostic of diagnostics) {
-            const severity = SEVERITY_NAMES[diagnostic.severity];
-            if (SEVERITY_ORDER.indexOf(severity) > threshold) {
-                continue;
-            }
-            counts[severity]++;
-            problems.push({
-                file,
-                // VS Code positions are zero-based; editors and humans are not.
-                line: diagnostic.range.start.line + 1,
-                column: diagnostic.range.start.character + 1,
-                endLine: diagnostic.range.end.line + 1,
-                endColumn: diagnostic.range.end.character + 1,
-                severity,
-                source: diagnostic.source ?? 'unknown',
-                code: codeToString(diagnostic.code),
-                message: diagnostic.message,
-            });
-        }
-    }
+        counts[problem.severity]++;
+        return true;
+    });
 
     problems.sort((a, b) => {
         const bySeverity =
@@ -547,6 +599,8 @@ async function write() {
         counts,
         total,
         truncated,
+        mode: isLive() ? 'live' : 'accumulated',
+        warmup: summarizeWarmup(),
         problems: truncated ? problems.slice(0, maxProblems) : problems,
     };
 

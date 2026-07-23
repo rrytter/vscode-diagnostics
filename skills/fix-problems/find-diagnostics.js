@@ -74,6 +74,7 @@ console.log(`file:          ${file}`);
 console.log(`workspaceRoot: ${root}`);
 console.log(`generatedAt:   ${snapshot.generatedAt}  (${ageSeconds}s ago)`);
 console.log(`minSeverity:   ${snapshot.minSeverity}`);
+console.log(`mode:          ${snapshot.mode ?? 'live'}`);
 console.log(`total:         ${snapshot.total}`);
 console.log(
     `counts:        ` +
@@ -83,6 +84,23 @@ console.log(
 );
 if (snapshot.truncated) {
     console.log(`WARNING: export truncated at ${snapshot.problems.length} of ${snapshot.total}`);
+}
+if (snapshot.warmup) {
+    const w = snapshot.warmup;
+    console.log(
+        `warmup:        ${w.fileCount} file(s) analysed at ${w.completedAt}` +
+            (w.timedOut ? ' (TIMED OUT - may under-report)' : '') +
+            (w.cancelled ? ' (CANCELLED - partial coverage)' : ''),
+    );
+}
+// A live snapshot only covers files a language server currently holds open, so
+// "no problems" there usually means "nobody looked", not "nothing is wrong".
+if ((snapshot.mode ?? 'live') === 'live' && snapshot.total === 0) {
+    console.log(
+        'NOTE: mode=live and no problems reported. This covers only files open in ' +
+            'the editor, not the project. Run "Claude Diagnostics: Warm Up Project ' +
+            'Diagnostics" before concluding the project is clean.',
+    );
 }
 if (ageSeconds > 300) {
     console.log(`WARNING: snapshot is ${Math.round(ageSeconds / 60)} minutes old; it may be stale.`);

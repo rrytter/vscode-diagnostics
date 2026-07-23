@@ -76,15 +76,46 @@ deliberate command rather than something that runs at startup, and it shows a
 **cancellable** progress notification. Above `warmupMaxFiles` it asks first
 rather than silently analysing a subset.
 
-Language servers work asynchronously: when the pass finishes they are usually
-still analysing, and the snapshot keeps updating on its own debounce as results
-arrive. Give it a moment before trusting the counts.
+### Why the warm-up switches to accumulating
+
+Those documents do not stay open. VS Code closes anything no editor references,
+and on close a language server may retract everything it published for that file
+— Intelephense and SonarLint both do. So the Problems panel *drains* as the pass
+proceeds, and reading it afterwards gives back a fraction of what was found.
+
+The panel is a window, not a record. So a warm-up switches the bridge into
+**accumulated mode**: every problem is kept as it is published and survives the
+panel forgetting it. The snapshot then describes the project rather than your
+editor session.
+
+While accumulating:
+
+- Fixes still land. When a file is re-analysed its entries are **replaced**, so a
+  problem you fix disappears instead of haunting the snapshot.
+- A file going silent because VS Code evicted it is *not* treated as clean —
+  otherwise eviction would quietly delete real findings. Entries are only cleared
+  when the file is still open, i.e. when the server genuinely had something to say.
+- The status bar bullet is **hollow** (`○`), and `mode` in the snapshot reads
+  `accumulated`.
+
+Run **Claude Diagnostics: Resume Live Updates** (status bar menu, or the command
+palette) when you are done fixing. That discards the record and goes back to
+mirroring the panel, with a **filled** bullet (`●`). Expect the counts to drop
+sharply — that is the honest live reading, since most files are no longer open.
+
+Language servers work asynchronously, so the pass waits for them to fall quiet
+before finishing, up to `warmupSettleTimeoutMs`. A timeout is reported rather
+than hidden.
 
 | Setting | Default | Meaning |
 | --- | --- | --- |
 | `claudeDiagnostics.warmupInclude` | `**/*` | Files to load. Narrow to your linted languages (e.g. `**/*.{php,ts,js}`) to speed the pass up a lot. |
 | `claudeDiagnostics.warmupExclude` | `node_modules`, `vendor`, `.git`, `dist`, … | Excluded on top of your `files.exclude` / `search.exclude`, which are always honoured. |
 | `claudeDiagnostics.warmupMaxFiles` | `2000` | Count above which it asks before proceeding. |
+| `claudeDiagnostics.warmupSettleTimeoutMs` | `120000` | Upper bound on waiting for language servers to finish after the last file is loaded. |
+
+> **Note:** the accumulated record lives in memory. Reloading the window drops it
+> and you will need to warm up again.
 
 ## Output location
 
@@ -114,6 +145,7 @@ behaviour). Leave it empty for the home-dir default.
 | `claudeDiagnostics.warmupInclude` | `**/*` | Files loaded by the [warm-up pass](#project-wide-diagnostics-warm-up). |
 | `claudeDiagnostics.warmupExclude` | `node_modules`, `vendor`, … | Excluded from the warm-up pass. |
 | `claudeDiagnostics.warmupMaxFiles` | `2000` | Warm-up count above which it asks first. |
+| `claudeDiagnostics.warmupSettleTimeoutMs` | `120000` | How long the warm-up waits for language servers to fall quiet. |
 
 Only the first workspace folder is exported, and only `file://` URIs inside it —
 diffs, settings editors, and files outside the workspace are skipped.
@@ -124,16 +156,25 @@ A status bar item on the right shows what the bridge is doing:
 
 | Appearance | Meaning |
 | --- | --- |
-| `$(error) 1 $(warning) 5` | Running; last snapshot had 1 error, 5 warnings. |
-| `$(broadcast) warning` | Running (`mode` / `icon` display); exporting warnings and up. |
+| `● $(error) 1 $(warning) 5` | **Live**, following the panel; last snapshot had 1 error, 5 warnings. |
+| `○ $(error) 12 $(warning) 40` | **Accumulated**, holding warm-up results until you resume. |
+| `● warning` | Live (`mode` / `icon` display); exporting warnings and up. |
 | `$(debug-pause) paused` | Not writing. Diagnostics changes are ignored. |
 | `$(alert) write failed` | Last write errored; the log has details. Highlighted. |
 
-Counts use `$(error)` and `$(warning)`, matching the Problems panel. Write
-failures use `$(alert)` rather than `$(error)` so a broken bridge never reads as
-"your code has one error". The tooltip shows the exact output path.
+The leading bullet is the mode: **filled** (`●`) means live, **hollow** (`○`)
+means accumulated. It shows in every display mode, because mistaking a frozen
+snapshot for a live one is the error that actually costs you. Counts use
+`$(error)` and `$(warning)`, matching the Problems panel. Write failures use
+`$(alert)` rather than `$(error)` so a broken bridge never reads as "your code
+has one error".
 
-Click it for a menu: pause/resume, write now, warm up project diagnostics, change
+The tooltip shows the mode, the last warm-up, and the exact output path. It is
+suppressed while a warm-up is running, since it shares a corner with the progress
+notification and would cover it.
+
+Click it for a menu: pause/resume, write now, warm up project diagnostics, resume
+live updates (only while accumulating), change
 minimum severity, change the status bar display, register/unregister the MCP
 server, install the fix-problems skill, open the snapshot, copy its path, show the
 log. Severity and display changes
