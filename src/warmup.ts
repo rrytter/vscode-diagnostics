@@ -31,6 +31,7 @@ import * as vscode from 'vscode';
  */
 
 import { beginAccumulating, noteFilesAnalysed, setWarmingUp } from './collector';
+import { loadIgnoreMatcher } from './gitignore';
 
 /** Directories that never carry first-party diagnostics but do carry huge trees. */
 const DEFAULT_EXCLUDE =
@@ -48,6 +49,7 @@ interface WarmupConfig {
     exclude: string;
     maxFiles: number;
     settleTimeoutMs: number;
+    respectGitignore: boolean;
 }
 
 function warmupConfig(): WarmupConfig {
@@ -57,16 +59,40 @@ function warmupConfig(): WarmupConfig {
         exclude: config.get<string>('warmupExclude', DEFAULT_EXCLUDE),
         maxFiles: config.get<number>('warmupMaxFiles', 2000),
         settleTimeoutMs: config.get<number>('warmupSettleTimeoutMs', 120000),
+        respectGitignore: config.get<boolean>('warmupRespectGitignore', true),
     };
 }
 
 /**
- * `findFiles` with `useDefaultExcludes` honours files.exclude and search.exclude,
- * which is how the user's .gitignore-driven search settings take effect. We add
- * our own exclude glob on top for the directories that are costly regardless.
+ * `findFiles` honours `files.exclude` and `search.exclude`, and our own exclude
+ * glob on top. It does NOT honour `.gitignore` — a common and costly assumption,
+ * because build output, caches, and vendored trees are real code that linters
+ * will happily report problems in. Findings from `var/cache/index.php` look
+ * exactly like findings from source, so they waste attention and, when handed to
+ * Claude, invite edits to generated files.
+ *
+ * So ignored files are filtered out explicitly, unless the user opts back in.
  */
-async function collectFiles(config: WarmupConfig): Promise<vscode.Uri[]> {
-    return vscode.workspace.findFiles(config.include, config.exclude);
+async function collectFiles(
+    config: WarmupConfig,
+    root: vscode.WorkspaceFolder,
+    output: vscode.OutputChannel,
+): Promise<{ files: vscode.Uri[]; ignored: number }> {
+    const found = await vscode.workspace.findFiles(config.include, config.exclude);
+
+    if (!config.respectGitignore) {
+        return { files: found, ignored: 0 };
+    }
+
+    const matcher = await loadIgnoreMatcher(root, output);
+    if (matcher.ruleCount === 0) {
+        return { files: found, ignored: 0 };
+    }
+
+    const files = found.filter(
+        (uri) => !matcher.ignores(vscode.workspace.asRelativePath(uri, false)),
+    );
+    return { files, ignored: found.length - files.length };
 }
 
 /**
@@ -118,11 +144,18 @@ export async function warmUpDiagnostics(output: vscode.OutputChannel): Promise<v
     }
 
     const config = warmupConfig();
-    const files = await collectFiles(config);
+    const { files, ignored } = await collectFiles(config, root, output);
+
+    if (ignored > 0) {
+        output.appendLine(`Warm-up: skipped ${ignored} git-ignored file(s).`);
+    }
 
     if (files.length === 0) {
         vscode.window.showInformationMessage(
-            'Claude Diagnostics: no files matched the warm-up globs.',
+            ignored > 0
+                ? `Claude Diagnostics: all ${ignored} matching file(s) are git-ignored. ` +
+                      'Set claudeDiagnostics.warmupRespectGitignore to false to include them.'
+                : 'Claude Diagnostics: no files matched the warm-up globs.',
         );
         return;
     }
@@ -219,6 +252,7 @@ export async function warmUpDiagnostics(output: vscode.OutputChannel): Promise<v
 
     const summary =
         `Warm-up: opened ${opened} file(s)` +
+        (ignored ? `, skipped ${ignored} git-ignored` : '') +
         (failed ? `, skipped ${failed} unreadable` : '') +
         (cancelled ? ' (cancelled early)' : '') +
         (timedOut ? ' (language servers still busy at timeout)' : '');

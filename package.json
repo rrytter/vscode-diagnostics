@@ -2,7 +2,7 @@
   "name": "claude-diagnostics-bridge",
   "displayName": "Claude Diagnostics Bridge",
   "description": "Exports VS Code Problems panel diagnostics to a JSON file for Claude Code to read.",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "publisher": "rrytter",
   "license": "MIT",
   "author": "Romain Rytter",
@@ -76,6 +76,11 @@
           "type": "number",
           "default": 2000,
           "description": "File count above which the warm-up asks before proceeding. It never truncates silently."
+        },
+        "claudeDiagnostics.warmupRespectGitignore": {
+          "type": "boolean",
+          "default": true,
+          "markdownDescription": "Skip files matched by `.gitignore` (and `.git/info/exclude`) during the warm-up. VS Code's file search does **not** honour `.gitignore` on its own, so without this the pass loads build output, caches, and vendored code, and reports their problems as if they were yours. Turn off to analyse ignored files too."
         },
         "claudeDiagnostics.warmupSettleTimeoutMs": {
           "type": "number",

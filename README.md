@@ -76,6 +76,25 @@ deliberate command rather than something that runs at startup, and it shows a
 **cancellable** progress notification. Above `warmupMaxFiles` it asks first
 rather than silently analysing a subset.
 
+### `.gitignore` is honoured
+
+VS Code's file search does **not** read `.gitignore` — it honours `files.exclude`
+and `search.exclude`, which are different settings that merely tend to overlap.
+Left alone, a warm-up therefore loads build output, caches, and vendored trees
+and reports their problems as if they were yours. Generated PHP is the worst
+case: it is real code, so linters produce real, plausible findings for files
+nobody should ever edit, and handing those to Claude invites edits to generated
+files.
+
+So the warm-up applies `.gitignore` itself (plus nested ignore files and
+`.git/info/exclude`), matching gitignore(5) semantics: anchoring, negation,
+directory-only rules, and `*`/`?`/`**` wildcards. Git is never shelled out to,
+so this works in folders that are not repositories. Skipped files are reported in
+the log and the completion summary.
+
+Set `claudeDiagnostics.warmupRespectGitignore` to `false` to analyse ignored
+files too.
+
 ### Why the warm-up switches to accumulating
 
 Those documents do not stay open. VS Code closes anything no editor references,
@@ -111,6 +130,7 @@ than hidden.
 | --- | --- | --- |
 | `claudeDiagnostics.warmupInclude` | `**/*` | Files to load. Narrow to your linted languages (e.g. `**/*.{php,ts,js}`) to speed the pass up a lot. |
 | `claudeDiagnostics.warmupExclude` | `node_modules`, `vendor`, `.git`, `dist`, … | Excluded on top of your `files.exclude` / `search.exclude`, which are always honoured. |
+| `claudeDiagnostics.warmupRespectGitignore` | `true` | Skip `.gitignore`d files. VS Code's search does not do this on its own. |
 | `claudeDiagnostics.warmupMaxFiles` | `2000` | Count above which it asks before proceeding. |
 | `claudeDiagnostics.warmupSettleTimeoutMs` | `120000` | Upper bound on waiting for language servers to finish after the last file is loaded. |
 
@@ -145,6 +165,7 @@ behaviour). Leave it empty for the home-dir default.
 | `claudeDiagnostics.warmupInclude` | `**/*` | Files loaded by the [warm-up pass](#project-wide-diagnostics-warm-up). |
 | `claudeDiagnostics.warmupExclude` | `node_modules`, `vendor`, … | Excluded from the warm-up pass. |
 | `claudeDiagnostics.warmupMaxFiles` | `2000` | Warm-up count above which it asks first. |
+| `claudeDiagnostics.warmupRespectGitignore` | `true` | Skip files matched by `.gitignore` during the warm-up. |
 | `claudeDiagnostics.warmupSettleTimeoutMs` | `120000` | How long the warm-up waits for language servers to fall quiet. |
 
 Only the first workspace folder is exported, and only `file://` URIs inside it —
